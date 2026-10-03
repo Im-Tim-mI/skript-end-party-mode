@@ -1,0 +1,851 @@
+# ------------------------------------------------------------
+#  skript-end-party-mode (English edition)
+#  https://github.com/Im-Tim-mI/skript-end-party-mode
+#  Copyright (c) 2026 廷廷小教室、廷廷的家（Tim945）
+#  License: MIT + Commons Clause (see LICENSE)
+# ------------------------------------------------------------
+
+# ============================================
+# Party Mode
+# A wild mob-fighting party in The End!
+# Difficulty: easy / normal / hard
+# ============================================
+
+options:
+    prefix: &d[&5Party Mode&d]
+    party_world: world_the_end
+    party_tp_x: 100
+    party_tp_y: 50
+    party_tp_z: 0
+
+# ============================================
+# Mob lists & contest scores
+# ============================================
+on script load:
+    # Easy mobs (weak)
+    set {party.mobs.easy::*} to "zombie" and "skeleton" and "spider" and "cave_spider" and "silverfish" and "slime" and "endermite" and "phantom"
+
+    # Normal mobs (medium)
+    set {party.mobs.normal::*} to "creeper" and "witch" and "pillager" and "vindicator" and "zombified_piglin" and "piglin" and "blaze" and "hoglin" and "enderman" and "stray" and "husk"
+
+    # Hard mobs (strong)
+    set {party.mobs.hard::*} to "evoker" and "ravager" and "piglin_brute" and "zoglin" and "wither_skeleton" and "ghast" and "magma_cube" and "shulker" and "guardian" and "elder_guardian"
+
+    # Bosses
+    set {party.mobs.boss::*} to "warden" and "wither" and "ender_dragon"
+
+    send "{@prefix} &aMob lists loaded!" to console
+
+on script load:
+    # ── Easy mobs: 1~2 points ──
+    set {party.score.zombie} to 1
+    set {party.score.skeleton} to 1
+    set {party.score.spider} to 1
+    set {party.score.cave spider} to 2
+    set {party.score.silverfish} to 1
+    set {party.score.slime} to 1
+    set {party.score.endermite} to 1
+    set {party.score.phantom} to 2
+    # ── Normal mobs: 3~5 points ──
+    set {party.score.creeper} to 3
+    set {party.score.witch} to 4
+    set {party.score.pillager} to 3
+    set {party.score.vindicator} to 4
+    set {party.score.zombified piglin} to 3
+    set {party.score.piglin} to 3
+    set {party.score.blaze} to 4
+    set {party.score.hoglin} to 3
+    set {party.score.enderman} to 5
+    set {party.score.stray} to 3
+    set {party.score.husk} to 3
+    # ── Hard mobs: 5~10 points ──
+    set {party.score.evoker} to 8
+    set {party.score.ravager} to 10
+    set {party.score.piglin brute} to 7
+    set {party.score.zoglin} to 6
+    set {party.score.wither skeleton} to 5
+    set {party.score.ghast} to 6
+    set {party.score.magma cube} to 5
+    set {party.score.shulker} to 7
+    set {party.score.guardian} to 5
+    set {party.score.elder guardian} to 10
+    # ── Bosses: special high scores ──
+    set {party.score.warden} to 30
+    set {party.score.wither} to 40
+    set {party.score.ender dragon} to 50
+
+    send "{@prefix} &aContest scores loaded!" to console
+
+# ============================================
+# Safety net: when the script loads and no party is running,
+# force normal item drops on death in The End again (so a crash / restart can't leave keep_inventory stuck on)
+# ============================================
+on script load:
+    wait 1 second
+    if {party.active} is not true:
+        execute console command "execute in minecraft:the_end run gamerule keep_inventory false"
+        send "{@prefix} &7Safety check: death drops in The End reset to normal" to console
+
+# ============================================
+# Kill scoring (contest mode only)
+# ============================================
+on death of living entity:
+    if {party.contest} is not true:
+        stop
+    if world of victim is not world "world_the_end":
+        stop
+    if attacker is not a player:
+        stop
+
+    set {_type} to "%type of victim%" in lowercase
+    set {_score} to {party.score.%{_type}%}
+    if {_score} is not set:
+        stop
+
+    add {_score} to {party.contest.score::%uuid of attacker%}
+    add 1 to {party.contest.kills::%uuid of attacker%}
+    set {party.contest.name::%uuid of attacker%} to name of attacker
+
+    send action bar "&6+%{_score}% pts  &8│  &7Total &e%{party.contest.score::%uuid of attacker%}% pts  &8│  &7Kills &f%{party.contest.kills::%uuid of attacker%}%" to attacker
+
+# ============================================
+# Start a party (timed, no scoring)
+# ============================================
+command /partystart [<text=normal>] [<integer=30>] [<integer=10>]:
+    permission: op
+    trigger:
+        if {party.active} is true:
+            send "{@prefix} &cA party is already running!" to player
+            send "{@prefix} &7Use /partystop to end it" to player
+            stop
+
+        # Check the difficulty (anything unknown falls back to Normal)
+        set {_diff} to arg-1
+        if {_diff} is "easy":
+            set {_diff} to "Easy"
+        else if {_diff} is "hard":
+            set {_diff} to "Hard"
+        else:
+            set {_diff} to "Normal"
+
+        set {party.active} to true
+        set {party.difficulty} to {_diff}
+        set {party.duration} to arg-2
+        set {party.interval} to arg-3
+        set {party.remaining} to arg-2 * 60
+        set {party.warned.1min} to false
+
+        # Difficulty settings
+        if {_diff} is "Easy":
+            set {party.min.mobs} to 2
+            set {party.max.mobs} to 4
+            set {party.easy.chance} to 70
+            set {party.normal.chance} to 25
+            set {party.hard.chance} to 5
+            set {party.boss.chance} to 0
+            set {_color} to "&a"
+        else if {_diff} is "Normal":
+            set {party.min.mobs} to 3
+            set {party.max.mobs} to 6
+            set {party.easy.chance} to 40
+            set {party.normal.chance} to 40
+            set {party.hard.chance} to 18
+            set {party.boss.chance} to 2
+            set {_color} to "&e"
+        else if {_diff} is "Hard":
+            set {party.min.mobs} to 5
+            set {party.max.mobs} to 10
+            set {party.easy.chance} to 15
+            set {party.normal.chance} to 35
+            set {party.hard.chance} to 40
+            set {party.boss.chance} to 10
+            set {_color} to "&c"
+
+        # Turn on keep-inventory in The End
+        execute console command "execute in minecraft:the_end run gamerule keep_inventory true"
+        broadcast "{@prefix} &aKeep-inventory is ON in The End - fight without worry!"
+
+        # Full-screen title - start
+        send title "&d&l🎉 Party Mode Started!" with subtitle "&eDifficulty: %{_diff}% &7- &eTime: %arg-2% minutes" to all players for 4 seconds with fade in 0.5 seconds and fade out 1 seconds
+        play sound "ENTITY_ENDER_DRAGON_GROWL" with volume 0.5 to all players
+
+        # Start broadcast
+        broadcast ""
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast "&5&l     🎉 Party Mode Started! 🎉"
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast ""
+        broadcast "&7Difficulty: %{_color}%%{_diff}%"
+        broadcast "&7Time: &e%arg-2% minutes"
+        broadcast "&7Spawn interval: &eevery %arg-3% seconds"
+        broadcast "&7Location: &cThe End"
+        broadcast "&7Keep-inventory: &aON"
+        if {_diff} is "Hard":
+            broadcast ""
+            broadcast "&c&l⚠ Warning: the Ender Dragon may appear on Hard!"
+        broadcast ""
+        broadcast "&eHead to The End and join the party!"
+        broadcast "&eUse /partygo to get there"
+        broadcast ""
+
+        # Start the spawn loop
+        while {party.active} is true:
+            spawnPartyMobs()
+            wait "%{party.interval}% seconds" parsed as timespan
+            remove {party.interval} from {party.remaining}
+
+            # One-minute reminder
+            if {party.remaining} <= 60:
+                if {party.warned.1min} is false:
+                    set {party.warned.1min} to true
+                    send title "&e&l⏰ The party is almost over!" with subtitle "&7Time left: 1 minute" to all players for 3 seconds
+                    broadcast ""
+                    broadcast "{@prefix} &e⏰ The party is almost over! Time left: &c1 minute"
+                    broadcast "{@prefix} &7Make the most of it!"
+                    broadcast ""
+                    play sound "BLOCK_NOTE_BLOCK_BELL" with volume 1 to all players
+
+            if {party.remaining} <= 0:
+                set {party.active} to false
+
+        # Clear the mobs in The End automatically
+        partyCleanup()
+
+        # Full-screen title - end
+        send title "&d&l🎉 Party Over!" with subtitle "&eThanks for joining! See you next time!" to all players for 4 seconds with fade in 0.5 seconds and fade out 1 seconds
+        play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 1 to all players
+
+        # End broadcast
+        broadcast ""
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast "&5&l     🎉 Party Over! 🎉"
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast ""
+        broadcast "&eThanks for joining! See you next time!"
+        broadcast "&7Keep-inventory in The End is now OFF"
+        broadcast ""
+
+        wait 5 seconds
+        execute console command "execute in minecraft:the_end run gamerule keep_inventory false"
+
+# ============================================
+# Party contest (scoring + leaderboard + awards)
+# Usage:   /partycontest [difficulty] [minutes] [spawn interval in seconds]
+# Example: /partycontest hard 30 10
+# ============================================
+command /partycontest [<text=normal>] [<integer=30>] [<integer=10>]:
+    permission: op
+    trigger:
+        if {party.active} is true:
+            send "{@prefix} &cA party is already running! Use /partystop to end it first" to player
+            stop
+
+        # Clear old contest data
+        delete {party.contest.score::*}
+        delete {party.contest.kills::*}
+        delete {party.contest.name::*}
+        set {party.contest.cycle} to 0
+
+        # Parse the difficulty (anything unknown falls back to Normal)
+        set {_diff} to arg-1
+        if {_diff} is "easy":
+            set {_diff} to "Easy"
+        else if {_diff} is "hard":
+            set {_diff} to "Hard"
+        else:
+            set {_diff} to "Normal"
+
+        set {party.active} to true
+        set {party.contest} to true
+        set {party.difficulty} to {_diff}
+        set {party.interval} to arg-3
+        set {party.remaining} to arg-2 * 60
+        set {party.warned.1min} to false
+
+        if {_diff} is "Easy":
+            set {party.min.mobs} to 2
+            set {party.max.mobs} to 4
+            set {party.easy.chance} to 70
+            set {party.normal.chance} to 25
+            set {party.hard.chance} to 5
+            set {party.boss.chance} to 0
+            set {_color} to "&a"
+        else if {_diff} is "Normal":
+            set {party.min.mobs} to 3
+            set {party.max.mobs} to 6
+            set {party.easy.chance} to 40
+            set {party.normal.chance} to 40
+            set {party.hard.chance} to 18
+            set {party.boss.chance} to 2
+            set {_color} to "&e"
+        else if {_diff} is "Hard":
+            set {party.min.mobs} to 5
+            set {party.max.mobs} to 10
+            set {party.easy.chance} to 15
+            set {party.normal.chance} to 35
+            set {party.hard.chance} to 40
+            set {party.boss.chance} to 10
+            set {_color} to "&c"
+
+        execute console command "execute in minecraft:the_end run gamerule keep_inventory true"
+        broadcast "{@prefix} &aKeep-inventory is ON in The End - fight without worry!"
+
+        send title "&d&l🏆 Party Contest Started!" with subtitle "%{_color}%Difficulty: %{_diff}%  &7│  &eTime: %arg-2% minutes" to all players for 4 seconds with fade in 0.5 seconds and fade out 1 seconds
+        play sound "ENTITY_ENDER_DRAGON_GROWL" with volume 0.5 to all players
+
+        broadcast ""
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast "&5&l      🏆 Party Contest Started! 🏆"
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast ""
+        broadcast "&7Difficulty: %{_color}%%{_diff}%  &8│  &7Time: &e%arg-2% minutes  &8│  &7Spawn interval: &e%arg-3% seconds"
+        broadcast "&7Location: &cThe End  &8│  &7Keep-inventory: &aON"
+        broadcast ""
+        broadcast "&e─── Mob Scores ───"
+        broadcast "  &aEasy mobs &71~2 pts  &8│  &eNormal mobs &73~5 pts  &8│  &cHard mobs &75~10 pts"
+        broadcast "  &5Bosses &8→ &cWarden &f30 pts  &8│  &cWither &f40 pts  &8│  &cEnder Dragon &f50 pts"
+        broadcast ""
+        broadcast "&eGo to The End: &f/partygo  &7│  &eCheck your score: &f/myscore"
+        if {_diff} is "Hard":
+            broadcast ""
+            broadcast "&c&l⚠ Hard mode: the Ender Dragon may be summoned!"
+        broadcast ""
+
+        # ── Main loop ──
+        while {party.active} is true:
+            spawnPartyMobs()
+            add 1 to {party.contest.cycle}
+            wait "%{party.interval}% seconds" parsed as timespan
+            remove {party.interval} from {party.remaining}
+
+            # Show the leaderboard every 5 spawn cycles
+            if mod({party.contest.cycle}, 5) = 0:
+                showPartyRanking()
+
+            # One-minute warning
+            if {party.remaining} <= 60:
+                if {party.warned.1min} is false:
+                    set {party.warned.1min} to true
+                    send title "&e&l⏰ The contest is almost over!" with subtitle "&7Time left: 1 minute - final sprint!" to all players for 3 seconds
+                    broadcast "{@prefix} &e⏰ &c1 minute &eleft in the contest! Final sprint!"
+                    play sound "BLOCK_NOTE_BLOCK_BELL" with volume 1 to all players
+
+            if {party.remaining} <= 0:
+                set {party.active} to false
+
+        # ── Wrap-up ──
+        partyCleanup()
+        set {party.contest} to false
+
+        send title "&d&l🏆 Contest Over!" with subtitle "&eCounting the results..." to all players for 3 seconds with fade in 0.5 seconds and fade out 1 seconds
+        play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 1 to all players
+        wait 2 seconds
+
+        broadcast ""
+        broadcast "&d&l✦═══════════════════════════════✦"
+        broadcast "&5&l    🏆 Party Contest Over! Final Ranking 🏆"
+        broadcast "&d&l✦═══════════════════════════════✦"
+        showPartyRanking()
+
+        wait 1 second
+        giveContestRewards()
+
+        broadcast "&eThanks to everyone who took part! See you next time!"
+        broadcast ""
+
+        wait 5 seconds
+        execute console command "execute in minecraft:the_end run gamerule keep_inventory false"
+
+# ============================================
+# Teleport to the party (only while a party is running)
+# ============================================
+command /partygo:
+    trigger:
+        if {party.active} is not true:
+            send "{@prefix} &cThere is no party running, so party teleports are closed for now." to player
+            stop
+
+        set {_world} to world "{@party_world}"
+        if {_world} is not set:
+            send "{@prefix} &cParty world not found: {@party_world}. Please ask an admin to check the settings." to player
+            stop
+
+        set {_loc} to location({@party_tp_x}, {@party_tp_y}, {@party_tp_z}, {_world})
+        teleport player to {_loc}
+        play sound "ENTITY_ENDERMAN_TELEPORT" with volume 1 and pitch 1 to player
+        send "{@prefix} &aTeleported to the party!" to player
+
+# ============================================
+# Spawn a wave of mobs manually
+# ============================================
+command /partyspawn [<text=normal>] [<integer=10>]:
+    permission: op
+    trigger:
+        set {_diff} to arg-1
+        set {_count} to arg-2
+
+        if {_count} > 100:
+            set {_count} to 100
+            send "{@prefix} &cAt most 100 per wave - adjusted automatically" to player
+
+        # Check the difficulty (anything unknown falls back to Normal)
+        if {_diff} is "easy":
+            set {_diff} to "Easy"
+        else if {_diff} is "hard":
+            set {_diff} to "Hard"
+        else:
+            set {_diff} to "Normal"
+
+        # Temporary difficulty settings
+        if {_diff} is "Easy":
+            set {party.easy.chance} to 70
+            set {party.normal.chance} to 25
+            set {party.hard.chance} to 5
+            set {party.boss.chance} to 0
+        else if {_diff} is "Normal":
+            set {party.easy.chance} to 40
+            set {party.normal.chance} to 40
+            set {party.hard.chance} to 18
+            set {party.boss.chance} to 2
+        else if {_diff} is "Hard":
+            set {party.easy.chance} to 15
+            set {party.normal.chance} to 35
+            set {party.hard.chance} to 40
+            set {party.boss.chance} to 10
+
+        set {_spawned} to 0
+        loop {_count} times:
+            if spawnRandomPartyMob() is true:
+                add 1 to {_spawned}
+
+        broadcast "{@prefix} &aSpawned &e%{_spawned}% &amobs! Difficulty: &e%{_diff}%"
+        broadcast "{@prefix} &7Hurry to The End and fight!"
+
+# ============================================
+# Stop the party
+# ============================================
+command /partystop:
+    permission: op
+    trigger:
+        if {party.active} is not true:
+            send "{@prefix} &cThere is no party running" to player
+            stop
+
+        set {party.active} to false
+
+        # In contest mode, settle the ranking and hand out the awards
+        if {party.contest} is true:
+            set {party.contest} to false
+            partyCleanup()
+
+            send title "&c&lParty Contest Stopped" with subtitle "&7Ended by an admin - counting the results..." to all players for 3 seconds
+            play sound "ENTITY_ENDER_DRAGON_HURT" with volume 0.5 to all players
+            broadcast "{@prefix} &cThe party contest was stopped by an admin - final results coming up!"
+            wait 2 seconds
+            showPartyRanking()
+            wait 1 second
+            giveContestRewards()
+        else:
+            partyCleanup()
+
+            send title "&c&lParty Stopped" with subtitle "&7An admin ended the event" to all players for 3 seconds
+            play sound "ENTITY_ENDER_DRAGON_HURT" with volume 0.5 to all players
+            broadcast "{@prefix} &cThe party was stopped by an admin!"
+
+        broadcast "{@prefix} &7Keep-inventory in The End is now OFF"
+
+        wait 5 seconds
+        execute console command "execute in minecraft:the_end run gamerule keep_inventory false"
+
+# ============================================
+# Clear every mob in The End
+# ============================================
+command /partyclear:
+    permission: op
+    trigger:
+        partyCleanup()
+        send "{@prefix} &aCleanup done!" to player
+
+# ============================================
+# Party status
+# ============================================
+command /partystatus:
+    permission: op
+    trigger:
+        send "{@prefix} &e═══ Party Status ═══" to player
+        if {party.active} is true:
+            send "&7Status: &arunning" to player
+            if {party.contest} is true:
+                send "&7Mode: &dcontest (scored)" to player
+            else:
+                send "&7Mode: &7regular party" to player
+            send "&7Difficulty: &e%{party.difficulty}%" to player
+            set {_min} to floor({party.remaining} / 60)
+            set {_sec} to mod({party.remaining}, 60)
+            send "&7Time left: &e%{_min}% min %{_sec}% s" to player
+            send "&7Interval: &e%{party.interval}% seconds" to player
+            send "&7Mobs per player: &e%{party.min.mobs}%-%{party.max.mobs}%" to player
+            send "&7Keep-inventory: &aON" to player
+        else:
+            send "&7Status: &cnot running" to player
+            send "&7Keep-inventory: &cOFF" to player
+
+        # Count the mobs in The End
+        set {_count} to 0
+        loop all entities in world "world_the_end":
+            if loop-entity is not a player:
+                add 1 to {_count}
+        send "&7Mobs in The End: &e%{_count}%" to player
+
+# ============================================
+# Personal score (any player, during a contest)
+# ============================================
+command /myscore:
+    trigger:
+        if {party.contest} is not true:
+            send "{@prefix} &cThere is no contest running" to player
+            stop
+        set {_score} to {party.contest.score::%uuid of player%}
+        set {_kills} to {party.contest.kills::%uuid of player%}
+        if {_score} is not set:
+            set {_score} to 0
+        if {_kills} is not set:
+            set {_kills} to 0
+        send "{@prefix} &7Your score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%" to player
+
+# ============================================
+# Show the current ranking (admins)
+# ============================================
+command /partyrank:
+    permission: op
+    trigger:
+        if {party.contest} is not true:
+            send "{@prefix} &cThere is no contest running" to player
+            stop
+        showPartyRanking()
+
+# ============================================
+# Help
+# ============================================
+command /partyhelp:
+    aliases: /party
+    trigger:
+        send "&d&l✦═══ Party Mode Help ═══✦" to player
+        send "" to player
+        send "&eA wild mob-fighting party in The End!" to player
+        send "&7During a party, type &f/partygo &7to teleport to The End." to player
+        send "&7You keep your items when you die during a party - fight without worry!" to player
+        send "" to player
+        send "&7Difficulties:" to player
+        send "&a  Easy &7- mostly weak mobs, no bosses" to player
+        send "&e  Normal &7- mixed mobs, 2%% boss chance" to player
+        send "&c  Hard &7- mostly strong mobs, 10%% boss chance incl. the Ender Dragon" to player
+        send "" to player
+        send "&7Contest scores:" to player
+        send "  &aEasy mobs &71~2 pts  &8│  &eNormal mobs &73~5 pts  &8│  &cHard mobs &75~10 pts" to player
+        send "  &5Bosses: &cWarden &f30  &8│  &cWither &f40  &8│  &cEnder Dragon &f50" to player
+        send "" to player
+        if player has permission "op":
+            send "&7Admin commands:" to player
+            send "&f  /partystart [difficulty] [minutes] [interval]" to player
+            send "&7    Regular party, no scoring" to player
+            send "&7    Example: /partystart hard 30 10" to player
+            send "" to player
+            send "&f  /partycontest [difficulty] [minutes] [interval]" to player
+            send "&7    Contest mode with scores, ranking and awards" to player
+            send "&7    Example: /partycontest hard 30 10" to player
+            send "" to player
+            send "&f  /partyspawn [difficulty] [amount] &7- spawn mobs manually, up to 100" to player
+            send "&f  /partystop &7- stop the party (contests are settled automatically)" to player
+            send "&f  /partyclear &7- clear the mobs in The End" to player
+            send "&f  /partystatus &7- show the status" to player
+            send "&f  /partyrank &7- show the contest leaderboard" to player
+            send "" to player
+        send "&7Player commands:" to player
+        send "&f  /partygo &7- teleport to The End during a party" to player
+        send "&f  /myscore &7- your score in the current contest" to player
+        send "" to player
+        send "&d&l✦═══════════════════════✦" to player
+
+# ============================================
+# Cleanup function
+# ============================================
+function partyCleanup():
+    set {_count} to 0
+    loop all entities in world "world_the_end":
+        if loop-entity is not a player:
+            kill loop-entity
+            add 1 to {_count}
+
+    broadcast "{@prefix} &cCleared &e%{_count}% &centities in The End!"
+
+# ============================================
+# Leaderboard (top 10)
+# ============================================
+function showPartyRanking():
+    broadcast ""
+    broadcast "&d&l✦══════ 🏆 Party Contest Leaderboard 🏆 ══════✦"
+
+    set {_shown} to 0
+    loop 10 times:
+        set {_max} to -1
+        set {_max.uuid} to ""
+
+        loop {party.contest.score::*}:
+            if {_seen::%loop-index%} is not set:
+                if loop-value-2 > {_max}:
+                    set {_max} to loop-value-2
+                    set {_max.uuid} to loop-index
+
+        if {_max.uuid} is "":
+            exit loop
+
+        set {_seen::%{_max.uuid}%} to true
+        add 1 to {_shown}
+
+        set {_n} to {party.contest.name::%{_max.uuid}%}
+        set {_k} to {party.contest.kills::%{_max.uuid}%}
+        if {_k} is not set:
+            set {_k} to 0
+
+        if {_shown} is 1:
+            broadcast "&6  🥇 &l#1  &r&f%{_n}%   &a%{_max}% pts  &8(&7%{_k}% kills&8)"
+        else if {_shown} is 2:
+            broadcast "&7  🥈 &l#2  &r&f%{_n}%   &a%{_max}% pts  &8(&7%{_k}% kills&8)"
+        else if {_shown} is 3:
+            broadcast "&e  🥉 &l#3  &r&f%{_n}%   &a%{_max}% pts  &8(&7%{_k}% kills&8)"
+        else:
+            broadcast "&8  #%{_shown}%  &7%{_n}%   &a%{_max}% pts  &8(&7%{_k}% kills&8)"
+
+    if {_shown} is 0:
+        broadcast "&7  No kills recorded yet"
+
+    broadcast "&d&l✦═════════════════════════════════✦"
+    broadcast ""
+
+# ============================================
+# Award ceremony (top 3 get rewards; offline players get them later)
+# ============================================
+function giveContestRewards():
+    set {_datestr} to "%now%"
+    set {_rank} to 0
+
+    broadcast ""
+    broadcast "&d&l✦══════════ 🎁 Award Ceremony 🎁 ══════════✦"
+
+    loop 3 times:
+        # Find the highest scorer who hasn't been awarded yet
+        set {_max} to -1
+        set {_max.uuid} to ""
+
+        loop {party.contest.score::*}:
+            if {_done::%loop-index%} is not set:
+                if loop-value-2 > {_max}:
+                    set {_max} to loop-value-2
+                    set {_max.uuid} to loop-index
+
+        if {_max.uuid} is "":
+            exit loop
+
+        set {_done::%{_max.uuid}%} to true
+        add 1 to {_rank}
+
+        set {_pname} to {party.contest.name::%{_max.uuid}%}
+        set {_kills} to {party.contest.kills::%{_max.uuid}%}
+        if {_kills} is not set:
+            set {_kills} to 0
+        set {_p} to "%{_pname}%" parsed as player
+
+        # ════════════════════════
+        # 🥇 1st place
+        # ════════════════════════
+        if {_rank} is 1:
+            broadcast ""
+            broadcast "&6&l  🏆 Champion  &r&f%{_pname}%   &a%{_max}% pts  &8(%{_kills}% kills)"
+            if {_p} is a player:
+                set {_prize} to 1 of gold block named "&6&l★ End Party Contest Champion ★"
+                set lore of {_prize} to "&7%{_datestr}% End Party Contest - 1st place" and "&7Score: &a%{_max}% pts  &8│  &7Kills: &f%{_kills}%" and "&5&o★ A trophy to remember your victory ★"
+                give {_p} {_prize}
+                broadcast "&6     Reward: &fGold Block × 1 &7(1st place trophy)"
+                send title "&6&l🏆 Congratulations! Party Contest Champion!" with subtitle "&e%{_datestr}% End Party Contest - 1st place" to {_p} for 5 seconds with fade in 0.5 seconds and fade out 1 seconds
+                play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 1 to {_p}
+            else:
+                set {party.pending.rank.%{_max.uuid}%} to 1
+                set {party.pending.score.%{_max.uuid}%} to {_max}
+                set {party.pending.kills.%{_max.uuid}%} to {_kills}
+                set {party.pending.name.%{_max.uuid}%} to {_pname}
+                set {party.pending.date.%{_max.uuid}%} to {_datestr}
+                broadcast "&6     Reward: &fGold Block × 1 &8(&7%{_pname}% is offline - it will be delivered on their next login&8)"
+
+        # ════════════════════════
+        # 🥈 2nd place
+        # ════════════════════════
+        else if {_rank} is 2:
+            broadcast ""
+            broadcast "&b&l  🥈 Runner-up  &r&f%{_pname}%   &a%{_max}% pts  &8(%{_kills}% kills)"
+            if {_p} is a player:
+                set {_prize} to 1 of iron block named "&b&l✦ End Party Contest Runner-up ✦"
+                set lore of {_prize} to "&7%{_datestr}% End Party Contest - 2nd place" and "&7Score: &a%{_max}% pts  &8│  &7Kills: &f%{_kills}%"
+                give {_p} {_prize}
+                broadcast "&b     Reward: &fIron Block × 1"
+                send title "&b&l🥈 Congratulations! Party Contest Runner-up!" with subtitle "&b%{_datestr}% End Party Contest - 2nd place" to {_p} for 5 seconds with fade in 0.5 seconds and fade out 1 seconds
+                play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 0.8 to {_p}
+            else:
+                set {party.pending.rank.%{_max.uuid}%} to 2
+                set {party.pending.score.%{_max.uuid}%} to {_max}
+                set {party.pending.kills.%{_max.uuid}%} to {_kills}
+                set {party.pending.name.%{_max.uuid}%} to {_pname}
+                set {party.pending.date.%{_max.uuid}%} to {_datestr}
+                broadcast "&b     Reward: &fIron Block × 1 &8(&7%{_pname}% is offline - it will be delivered on their next login&8)"
+
+        # ════════════════════════
+        # 🥉 3rd place
+        # ════════════════════════
+        else if {_rank} is 3:
+            broadcast ""
+            broadcast "&a&l  🥉 Third Place  &r&f%{_pname}%   &a%{_max}% pts  &8(%{_kills}% kills)"
+            if {_p} is a player:
+                set {_prize} to 1 of copper block named "&a&l✧ End Party Contest 3rd Place ✧"
+                set lore of {_prize} to "&7%{_datestr}% End Party Contest - 3rd place" and "&7Score: &a%{_max}% pts  &8│  &7Kills: &f%{_kills}%"
+                give {_p} {_prize}
+                broadcast "&a     Reward: &fCopper Block × 1"
+                send title "&a&l🥉 Congratulations! Party Contest 3rd Place!" with subtitle "&a%{_datestr}% End Party Contest - 3rd place" to {_p} for 5 seconds with fade in 0.5 seconds and fade out 1 seconds
+                play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 0.6 to {_p}
+            else:
+                set {party.pending.rank.%{_max.uuid}%} to 3
+                set {party.pending.score.%{_max.uuid}%} to {_max}
+                set {party.pending.kills.%{_max.uuid}%} to {_kills}
+                set {party.pending.name.%{_max.uuid}%} to {_pname}
+                set {party.pending.date.%{_max.uuid}%} to {_datestr}
+                broadcast "&a     Reward: &fCopper Block × 1 &8(&7%{_pname}% is offline - it will be delivered on their next login&8)"
+
+    broadcast ""
+    broadcast "&d&l✦═══════════════════════════════════════✦"
+    broadcast ""
+
+# ============================================
+# Spawn function (several mobs)
+# ============================================
+function spawnPartyMobs():
+    set {_players::*} to all players in world "world_the_end"
+    if size of {_players::*} is 0:
+        stop
+
+    # Spawn mobs near every player
+    loop {_players::*}:
+        set {_amount} to random integer between {party.min.mobs} and {party.max.mobs}
+        loop {_amount} times:
+            spawnMobNearPartyPlayer(loop-value-1)
+
+# ============================================
+# Spawn a mob near a player
+# ============================================
+function spawnMobNearPartyPlayer(p: player):
+    # Pick a mob according to the difficulty chances
+    set {_rand} to random integer between 1 and 100
+
+    # Cumulative chances
+    set {_easy.max} to {party.easy.chance}
+    set {_normal.max} to {_easy.max} + {party.normal.chance}
+    set {_hard.max} to {_normal.max} + {party.hard.chance}
+
+    if {_rand} <= {_easy.max}:
+        set {_mob} to random element of {party.mobs.easy::*}
+    else if {_rand} <= {_normal.max}:
+        set {_mob} to random element of {party.mobs.normal::*}
+    else if {_rand} <= {_hard.max}:
+        set {_mob} to random element of {party.mobs.hard::*}
+    else:
+        set {_mob} to random element of {party.mobs.boss::*}
+        # Special boss announcements
+        if {_mob} is "ender_dragon":
+            broadcast "&c&l⚠ The Ender Dragon has appeared!!!"
+            play sound "ENTITY_ENDER_DRAGON_GROWL" with volume 1 to all players
+        else if {_mob} is "wither":
+            broadcast "&c&l⚠ The Wither has appeared!!!"
+            play sound "ENTITY_WITHER_SPAWN" with volume 1 to all players
+        else if {_mob} is "warden":
+            broadcast "&c&l⚠ The Warden has appeared!!!"
+            play sound "ENTITY_WARDEN_ROAR" with volume 1 to all players
+
+    # Random offset
+    set {_x} to random integer between -20 and 20
+    set {_z} to random integer between -20 and 20
+
+    set {_loc} to location of {_p}
+    add {_x} to x-coordinate of {_loc}
+    add {_z} to z-coordinate of {_loc}
+
+    # Make sure it lands on the ground
+    set {_loc} to highest block at {_loc}
+    add 1 to y-coordinate of {_loc}
+
+    # Spawn the mob
+    if {_mob} is "ender_dragon":
+        execute console command "execute at %{_p}% in minecraft:the_end run summon minecraft:ender_dragon ~ ~10 ~ {DragonPhase:0}"
+    else:
+        spawn 1 of {_mob} parsed as entity type at {_loc}
+
+# ============================================
+# Spawn a single random mob (manual use)
+# ============================================
+function spawnRandomPartyMob() :: boolean:
+    set {_players::*} to all players in world "world_the_end"
+    if size of {_players::*} is 0:
+        return false
+
+    set {_p} to random element of {_players::*}
+    spawnMobNearPartyPlayer({_p})
+    return true
+
+# ============================================
+# Deliver pending rewards when the player logs in
+# ============================================
+on join:
+    set {_uuid} to uuid of player
+    if {party.pending.rank.%{_uuid}%} is not set:
+        stop
+
+    wait 3 seconds
+
+    set {_rank} to {party.pending.rank.%{_uuid}%}
+    set {_score} to {party.pending.score.%{_uuid}%}
+    set {_kills} to {party.pending.kills.%{_uuid}%}
+    set {_datestr} to {party.pending.date.%{_uuid}%}
+
+    if {_rank} is 1:
+        set {_prize} to 1 of gold block named "&6&l★ End Party Contest Champion ★"
+        set lore of {_prize} to "&7%{_datestr}% End Party Contest - 1st place" and "&7Score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%" and "&5&o★ A trophy to remember your victory ★"
+        give player {_prize}
+        send title "&6&l🏆 Congratulations! You are the Party Contest Champion!" with subtitle "&e%{_datestr}% End Party Contest - 1st place" to player for 5 seconds with fade in 0.5 seconds and fade out 1 seconds
+        send "{@prefix} &6&l[Delayed Reward]&r &7In the contest on &e%{_datestr}% &7you became the &6&lChampion!" to player
+        send "{@prefix} &7Score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%" to player
+        send "{@prefix} &fGold Block × 1 &ahas been added to your inventory!" to player
+        play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 1 to player
+
+    else if {_rank} is 2:
+        set {_prize} to 1 of iron block named "&b&l✦ End Party Contest Runner-up ✦"
+        set lore of {_prize} to "&7%{_datestr}% End Party Contest - 2nd place" and "&7Score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%"
+        give player {_prize}
+        send title "&b&l🥈 Congratulations! You are the Party Contest Runner-up!" with subtitle "&b%{_datestr}% End Party Contest - 2nd place" to player for 5 seconds with fade in 0.5 seconds and fade out 1 seconds
+        send "{@prefix} &b&l[Delayed Reward]&r &7In the contest on &e%{_datestr}% &7you became the &b&lRunner-up!" to player
+        send "{@prefix} &7Score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%" to player
+        send "{@prefix} &fIron Block × 1 &ahas been added to your inventory!" to player
+        play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 0.8 to player
+
+    else if {_rank} is 3:
+        set {_prize} to 1 of copper block named "&a&l✧ End Party Contest 3rd Place ✧"
+        set lore of {_prize} to "&7%{_datestr}% End Party Contest - 3rd place" and "&7Score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%"
+        give player {_prize}
+        send title "&a&l🥉 Congratulations! You took 3rd place in the Party Contest!" with subtitle "&a%{_datestr}% End Party Contest - 3rd place" to player for 5 seconds with fade in 0.5 seconds and fade out 1 seconds
+        send "{@prefix} &a&l[Delayed Reward]&r &7In the contest on &e%{_datestr}% &7you took &a&l3rd place!" to player
+        send "{@prefix} &7Score: &a%{_score}% pts  &8│  &7Kills: &f%{_kills}%" to player
+        send "{@prefix} &fCopper Block × 1 &ahas been added to your inventory!" to player
+        play sound "UI_TOAST_CHALLENGE_COMPLETE" with volume 0.6 to player
+
+    # Clear the pending record (prevents double delivery)
+    delete {party.pending.rank.%{_uuid}%}
+    delete {party.pending.score.%{_uuid}%}
+    delete {party.pending.kills.%{_uuid}%}
+    delete {party.pending.name.%{_uuid}%}
+    delete {party.pending.date.%{_uuid}%}
